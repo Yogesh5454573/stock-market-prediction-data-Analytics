@@ -7,26 +7,22 @@ import time
 
 st.set_page_config(page_title="📈 Real-Time Stock Prediction & Analytics", layout="wide")
 
-# --- Auto NSE Converter ---
 def convert_symbol(symbol):
     symbol = symbol.strip().upper()
     if "." in symbol:
         return symbol
-    return symbol + ".NS"   # Auto convert Indian stocks
+    return symbol + ".NS"  
 
 
-# --- Sidebar Settings ---
 st.sidebar.header("⚙️ Settings")
 user_input = st.sidebar.text_input("Enter Stock Symbol", "TCS")
 stock_symbol = convert_symbol(user_input)
 
 update_interval = st.sidebar.slider("Update Interval (seconds):", 10, 120, 30)
 
-# --- Page Title ---
 st.title("📊 Real-Time Stock Price Monitoring, Analytics & Prediction")
 
 
-# --- Session State (Stores Streaming Data) ---
 if "prices" not in st.session_state:
     st.session_state.prices = []
 if "predicted" not in st.session_state:
@@ -35,10 +31,8 @@ if "time_index" not in st.session_state:
     st.session_state.time_index = []
 
 
-# --- ML Model ---
 model = LinearRegression()
 
-# --- Fetch Live Data ---
 try:
     df = yf.download(
         tickers=stock_symbol,
@@ -56,7 +50,6 @@ try:
     st.session_state.prices.append(latest_price)
     st.session_state.time_index.append(len(st.session_state.prices))
 
-    # --- Prediction ---
     if len(st.session_state.prices) >= 5:
         X = np.arange(len(st.session_state.prices)).reshape(-1, 1)
         y = np.array(st.session_state.prices)
@@ -66,7 +59,6 @@ try:
     else:
         st.session_state.predicted.append(latest_price)
 
-    # --- Trend ---
     trend = "➡️ Stable"
     if len(st.session_state.prices) > 1:
         if st.session_state.prices[-1] > st.session_state.prices[-2]:
@@ -79,9 +71,6 @@ except Exception as e:
     st.stop()
 
 
-# -------------------------------------------------------
-#                     PRICE ANALYTICS
-# -------------------------------------------------------
 st.header("📌 Price Analytics")
 
 info = yf.Ticker(stock_symbol).info
@@ -95,18 +84,15 @@ week52_low = info.get("fiftyTwoWeekLow", None)
 volume = info.get("volume", None)
 market_cap = info.get("marketCap", None)
 
-# % change
 pct_change = None
 if prev_close:
     pct_change = ((current_price - prev_close) / prev_close) * 100
 
-# Moving Averages
 daily_df = yf.download(stock_symbol, period="1y", interval="1d", auto_adjust=True, progress=False)
 daily_df["MA20"] = daily_df["Close"].rolling(20).mean()
 daily_df["MA50"] = daily_df["Close"].rolling(50).mean()
 daily_df["MA200"] = daily_df["Close"].rolling(200).mean()
 
-# ------- Display Cards -------
 col1, col2, col3 = st.columns(3)
 col1.metric("Current Price", f"₹{current_price}")
 col2.metric("Previous Close", f"₹{prev_close}")
