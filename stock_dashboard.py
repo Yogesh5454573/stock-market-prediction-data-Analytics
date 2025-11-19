@@ -1,88 +1,172 @@
 import streamlit as st
 import yfinance as yf
 import numpy as np
-import time
 from sklearn.linear_model import LinearRegression
 import plotly.graph_objects as go
+import time
 
-st.set_page_config(page_title="Simple Stock Prediction", layout="wide")
-st.title("📈 Real-Time Stock Price Prediction")
+st.set_page_config(page_title="📈 Real-Time Stock Prediction & Analytics", layout="wide")
 
-stock_symbol = st.text_input("Enter Stock Symbol:", "AAPL")
+# --- Auto NSE Converter ---
+def convert_symbol(symbol):
+    symbol = symbol.strip().upper()
+    if "." in symbol:
+        return symbol
+    return symbol + ".NS"   # Auto convert Indian stocks
 
-prices = []
-predicted_prices = []
-time_index = []
 
+# --- Sidebar Settings ---
+st.sidebar.header("⚙️ Settings")
+user_input = st.sidebar.text_input("Enter Stock Symbol", "TCS")
+stock_symbol = convert_symbol(user_input)
+
+update_interval = st.sidebar.slider("Update Interval (seconds):", 10, 120, 30)
+
+# --- Page Title ---
+st.title("📊 Real-Time Stock Price Monitoring, Analytics & Prediction")
+
+
+# --- Session State (Stores Streaming Data) ---
+if "prices" not in st.session_state:
+    st.session_state.prices = []
+if "predicted" not in st.session_state:
+    st.session_state.predicted = []
+if "time_index" not in st.session_state:
+    st.session_state.time_index = []
+
+
+# --- ML Model ---
 model = LinearRegression()
-chart = st.empty()
-status_text = st.empty()
-trend_text = st.empty()
 
-update_interval = st.slider("Update Interval (seconds):", 10, 120, 60, 10)
+# --- Fetch Live Data ---
+try:
+    df = yf.download(
+        tickers=stock_symbol,
+        period="1d",
+        interval="1m",
+        auto_adjust=True,
+        progress=False
+    )
 
-while True:
-    try:
-        data = yf.download(
-            tickers=stock_symbol,
-            period="1d",
-            interval="1m",
-            auto_adjust=True,
-            progress=False
-        )
+    if df.empty:
+        st.error("⚠ No data found for this stock!")
+        st.stop()
 
-        if data.empty:
-            status_text.warning("Waiting for data...")
-            time.sleep(update_interval)
-            continue
-        else:
-            status_text.success(f"Latest data fetched for {stock_symbol}")
-        latest_price = float(data['Close'].iloc[-1])
-        prices.append(latest_price)
-        time_index.append(len(prices))
+    latest_price = float(df["Close"].iloc[-1])
+    st.session_state.prices.append(latest_price)
+    st.session_state.time_index.append(len(st.session_state.prices))
 
-        if len(prices) >= 5:
-            X = np.arange(len(prices)).reshape(-1, 1)
-            y = np.array(prices)
-            model.fit(X, y)
-            next_pred = model.predict([[len(prices)]])[0]
-            predicted_prices.append(next_pred)
-        else:
-            predicted_prices.append(latest_price)
+    # --- Prediction ---
+    if len(st.session_state.prices) >= 5:
+        X = np.arange(len(st.session_state.prices)).reshape(-1, 1)
+        y = np.array(st.session_state.prices)
+        model.fit(X, y)
+        pred = model.predict([[len(st.session_state.prices)]])[0]
+        st.session_state.predicted.append(pred)
+    else:
+        st.session_state.predicted.append(latest_price)
 
-        if len(prices) > 1:
-            if prices[-1] > prices[-2]:
-                trend = "📈 Up"
-            elif prices[-1] < prices[-2]:
-                trend = "📉 Down"
-            else:
-                trend = "➡️ Stable"
-            trend_text.markdown(f"**Trend:** {trend} | Latest Price: {latest_price:.2f} | Predicted Next Price: {predicted_prices[-1]:.2f}")
-        else:
-            trend_text.markdown(f"Latest Price: {latest_price:.2f}")
+    # --- Trend ---
+    trend = "➡️ Stable"
+    if len(st.session_state.prices) > 1:
+        if st.session_state.prices[-1] > st.session_state.prices[-2]:
+            trend = "📈 Up"
+        elif st.session_state.prices[-1] < st.session_state.prices[-2]:
+            trend = "📉 Down"
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=time_index, y=prices,
-            mode="lines+markers", name="Actual Price",
-            line=dict(color="blue")
-        ))
-        fig.add_trace(go.Scatter(
-            x=time_index, y=predicted_prices,
-            mode="lines+markers", name="Predicted Price",
-            line=dict(color="red", dash="dash")
-        ))
-        fig.update_layout(
-            title=f"{stock_symbol} Price & Prediction",
-            xaxis_title="Time (minutes)",
-            yaxis_title="Price",
-            height=500
-        )
+except Exception as e:
+    st.error(f"Error fetching data: {e}")
+    st.stop()
 
-        chart.plotly_chart(fig, use_container_width=True)
 
-        time.sleep(update_interval)
+# -------------------------------------------------------
+#                     PRICE ANALYTICS
+# -------------------------------------------------------
+st.header("📌 Price Analytics")
 
-    except Exception as e:
-        status_text.error(f"Error fetching data: {e}")
-        time.sleep(update_interval)
+info = yf.Ticker(stock_symbol).info
+
+current_price = info.get("currentPrice", latest_price)
+prev_close = info.get("previousClose", None)
+day_high = info.get("dayHigh", None)
+day_low = info.get("dayLow", None)
+week52_high = info.get("fiftyTwoWeekHigh", None)
+week52_low = info.get("fiftyTwoWeekLow", None)
+volume = info.get("volume", None)
+market_cap = info.get("marketCap", None)
+
+# % change
+pct_change = None
+if prev_close:
+    pct_change = ((current_price - prev_close) / prev_close) * 100
+
+# Moving Averages
+daily_df = yf.download(stock_symbol, period="1y", interval="1d", auto_adjust=True, progress=False)
+daily_df["MA20"] = daily_df["Close"].rolling(20).mean()
+daily_df["MA50"] = daily_df["Close"].rolling(50).mean()
+daily_df["MA200"] = daily_df["Close"].rolling(200).mean()
+
+# ------- Display Cards -------
+col1, col2, col3 = st.columns(3)
+col1.metric("Current Price", f"₹{current_price}")
+col2.metric("Previous Close", f"₹{prev_close}")
+col3.metric("Daily % Change", f"{pct_change:.2f}%" if pct_change else "---")
+
+col4, col5, col6 = st.columns(3)
+col4.metric("Day High", f"₹{day_high}")
+col5.metric("Day Low", f"₹{day_low}")
+col6.metric("Volume", f"{volume:,}" if volume else "---")
+
+col7, col8, col9 = st.columns(3)
+col7.metric("52-Week High", f"₹{week52_high}")
+col8.metric("52-Week Low", f"₹{week52_low}")
+col9.metric("Market Cap", f"{market_cap:,}" if market_cap else "---")
+
+# -------------------------------------------------------
+#                 REAL-TIME PRICE & PREDICTION
+# -------------------------------------------------------
+
+st.subheader(f"Trend: {trend}")
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=st.session_state.time_index,
+    y=st.session_state.prices,
+    mode="lines+markers",
+    name="Actual Price"
+))
+fig.add_trace(go.Scatter(
+    x=st.session_state.time_index,
+    y=st.session_state.predicted,
+    mode="lines+markers",
+    name="Predicted Price"
+))
+fig.update_layout(
+    title=f"{stock_symbol} - Real-Time Price & Prediction",
+    height=500,
+    xaxis_title="Update Count",
+    yaxis_title="Price"
+)
+st.plotly_chart(fig, use_container_width=True)
+
+
+# -------------------------------------------------------
+#              MOVING AVERAGE ANALYTICS CHART
+# -------------------------------------------------------
+
+st.header("📈 Moving Average Chart (20 / 50 / 200 Days)")
+
+ma_fig = go.Figure()
+ma_fig.add_trace(go.Scatter(x=daily_df.index, y=daily_df["Close"], name="Close Price"))
+ma_fig.add_trace(go.Scatter(x=daily_df.index, y=daily_df["MA20"], name="MA20"))
+ma_fig.add_trace(go.Scatter(x=daily_df.index, y=daily_df["MA50"], name="MA50"))
+ma_fig.add_trace(go.Scatter(x=daily_df.index, y=daily_df["MA200"], name="MA200"))
+
+ma_fig.update_layout(height=500)
+st.plotly_chart(ma_fig, use_container_width=True)
+
+# -------------------------------------------------------
+#                      AUTO REFRESH
+# -------------------------------------------------------
+time.sleep(update_interval)
+st.rerun()
